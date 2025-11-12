@@ -134,6 +134,74 @@ app.post('/api/discover-tv', async (req, res) => {
   }
 });
 
+// 🔧 CONECTAR TV MANUALMENTE
+app.post('/api/connect-tv', async (req, res) => {
+  const { userId, tvIp, tvName } = req.body;
+  
+  console.log(`🔧 Conexão manual: ${tvName} → ${tvIp}`);
+  
+  try {
+    // Verificar se o IP é acessível
+    const isTV = await checkIfIsTV(tvIp);
+    
+    if (!isTV) {
+      return res.json({ 
+        success: false, 
+        message: `❌ IP ${tvIp} não responde. Verifique se está correto.` 
+      });
+    }
+
+    // Salvar/atualizar TV no banco
+    const { data: existingTV, error: searchError } = await supabase
+      .from('user_tvs')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    let result;
+    if (existingTV) {
+      // Atualizar TV existente
+      result = await supabase
+        .from('user_tvs')
+        .update({ 
+          tv_ip: tvIp,
+          tv_name: tvName || 'Minha TV',
+          tv_brand: 'tcl'
+        })
+        .eq('user_id', userId);
+    } else {
+      // Criar nova TV
+      result = await supabase
+        .from('user_tvs')
+        .insert([{
+          user_id: userId,
+          tv_name: tvName || 'Minha TV',
+          tv_brand: 'tcl',
+          tv_ip: tvIp
+        }]);
+    }
+
+    if (result.error) throw result.error;
+
+    res.json({ 
+      success: true, 
+      message: `✅ TV conectada manualmente! IP: ${tvIp}`,
+      tv: {
+        ip: tvIp,
+        name: tvName || 'Minha TV',
+        brand: 'tcl'
+      }
+    });
+    
+  } catch (error) {
+    console.error('Erro na conexão manual:', error);
+    res.json({ 
+      success: false, 
+      error: 'Erro ao conectar TV manualmente' 
+    });
+  }
+});
+
 // 📡 ENVIAR COMANDO PARA TV
 app.post('/api/send-command', async (req, res) => {
   const { tvIp, command } = req.body;
