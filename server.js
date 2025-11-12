@@ -85,7 +85,7 @@ app.post('/api/discover-tv', async (req, res) => {
   console.log('🔍 Procurando TV na rede para usuário:', userId);
   
   try {
-    // IPs comuns para teste
+    // IPs comuns para Roku
     const commonIPs = [
       '192.168.1.128', // SUA TV HQ
       '192.168.1.100', '192.168.1.101', '192.168.1.102', 
@@ -103,8 +103,8 @@ app.post('/api/discover-tv', async (req, res) => {
       if (isTV) {
         foundTV = { 
           ip: ip, 
-          brand: 'tcl', 
-          name: 'TV TCL'
+          brand: 'roku', 
+          name: 'TV Roku'
         };
         console.log(`🎉 TV encontrada: ${ip}`);
         break;
@@ -136,9 +136,9 @@ app.post('/api/discover-tv', async (req, res) => {
 
 // 🔧 CONECTAR TV MANUALMENTE
 app.post('/api/connect-tv', async (req, res) => {
-  const { userId, tvIp, tvName } = req.body;
+  const { userId, tvIp, tvName, tvBrand } = req.body;
   
-  console.log(`🔧 Conexão manual: ${tvName} → ${tvIp}`);
+  console.log(`🔧 Conexão manual: ${tvName} → ${tvIp} (${tvBrand})`);
   
   try {
     // Verificar se o IP é acessível
@@ -166,7 +166,7 @@ app.post('/api/connect-tv', async (req, res) => {
         .update({ 
           tv_ip: tvIp,
           tv_name: tvName || 'Minha TV',
-          tv_brand: 'tcl'
+          tv_brand: tvBrand || 'roku'
         })
         .eq('user_id', userId);
     } else {
@@ -176,7 +176,7 @@ app.post('/api/connect-tv', async (req, res) => {
         .insert([{
           user_id: userId,
           tv_name: tvName || 'Minha TV',
-          tv_brand: 'tcl',
+          tv_brand: tvBrand || 'roku',
           tv_ip: tvIp
         }]);
     }
@@ -189,7 +189,7 @@ app.post('/api/connect-tv', async (req, res) => {
       tv: {
         ip: tvIp,
         name: tvName || 'Minha TV',
-        brand: 'tcl'
+        brand: tvBrand || 'roku'
       }
     });
     
@@ -204,13 +204,22 @@ app.post('/api/connect-tv', async (req, res) => {
 
 // 📡 ENVIAR COMANDO PARA TV
 app.post('/api/send-command', async (req, res) => {
-  const { tvIp, command } = req.body;
+  const { tvIp, command, tvBrand } = req.body;
   
-  console.log(`📡 Tentando comando REAL: ${command} → ${tvIp} (TCL Android TV)`);
+  console.log(`📡 Tentando comando: ${command} → ${tvIp} (${tvBrand})`);
   
   try {
-    // ✅ PROTOCOLOS PRIORIZADOS PARA TCL ANDROID TV
-    const success = await sendCommandToTV(tvIp, command);
+    let success = false;
+    
+    // ✅ PROTOCOLO ESPECÍFICO POR MARCA
+    if (tvBrand === 'roku') {
+      success = await sendRokuCommand(tvIp, command);
+    } else if (tvBrand === 'tcl') {
+      success = await sendTCLCommand(tvIp, command);
+    } else {
+      // Tentar todos os protocolos
+      success = await sendGenericCommand(tvIp, command);
+    }
     
     if (success) {
       res.json({ 
@@ -233,13 +242,13 @@ app.post('/api/send-command', async (req, res) => {
 // 🛠️ FUNÇÕES AUXILIARES
 async function checkIfIsTV(ip) {
   try {
-    // Testar portas comuns de TVs Android
-    const ports = [5555, 6466, 8009, 8001, 8080, 8008];
+    // Testar portas comuns de TVs
+    const ports = [8060, 5555, 6466, 8009, 8001];
     
     for (const port of ports) {
       const isReachable = await checkPort(ip, port);
       if (isReachable) {
-        console.log(`✅ TV Android detectada na porta ${port}`);
+        console.log(`✅ TV detectada na porta ${port}`);
         return true;
       }
     }
@@ -267,49 +276,101 @@ async function checkPort(ip, port) {
   }
 }
 
-async function sendCommandToTV(ip, command) {
-  // ✅ PROTOCOLOS PRIORIZADOS PARA TCL ANDROID TV
+// ✅ PROTOCOLO ROKU (8060) - ALTÍSSIMA CHANCE DE FUNCIONAR!
+async function sendRokuCommand(ip, command) {
   try {
-    // Protocolo 1: Android TV ADB (5555) - MELHOR CHANCE!
-    if (await tryAndroidADBProtocol(ip, command)) {
+    console.log(`📺 Tentando protocolo ROKU na porta 8060...`);
+    
+    // Mapeamento de comandos Roku
+    const rokuCommandMap = {
+      'POWER': 'Power',
+      'VOLUME_UP': 'VolumeUp',
+      'VOLUME_DOWN': 'VolumeDown', 
+      'MUTE': 'VolumeMute',
+      'UP': 'Up',
+      'DOWN': 'Down',
+      'LEFT': 'Left',
+      'RIGHT': 'Right',
+      'ENTER': 'Select',
+      'HOME': 'Home',
+      'BACK': 'Back',
+      'MENU': 'Info',
+      'SOURCE': 'InputTv'
+    };
+    
+    const rokuCommand = rokuCommandMap[command];
+    if (!rokuCommand) {
+      console.log(`❌ Comando não mapeado para Roku: ${command}`);
+      return false;
+    }
+    
+    // URL do protocolo Roku (documentação oficial)
+    const url = `http://${ip}:8060/keypress/${rokuCommand}`;
+    
+    console.log(`🔗 Enviando para Roku: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(3000)
+    }).catch(() => null);
+    
+    if (response && response.ok) {
+      console.log(`✅ Protocolo ROKU FUNCIONOU! Comando: ${rokuCommand}`);
       return true;
     }
     
-    // Protocolo 2: Android TV HTTP (6466)
-    if (await tryAndroidTVProtocol(ip, command)) {
-      return true;
-    }
-    
-    // Protocolo 3: Google Cast (8009)
-    if (await trySendCommand(ip, 8009, command)) {
-      return true;
-    }
-    
-    // Protocolo 4: Porta genérica Smart TV (8001)
-    if (await trySendCommand(ip, 8001, command)) {
-      return true;
-    }
-    
-    // Protocolo 5: Porta 8080
-    if (await trySendCommand(ip, 8080, command)) {
-      return true;
-    }
-    
-    console.log(`❌ Nenhum protocolo funcionou para TCL Android TV`);
+    console.log(`❌ Roku não respondeu na porta 8060`);
     return false;
     
   } catch (error) {
-    console.log(`❌ Erro: ${error.message}`);
+    console.log(`❌ Erro Roku: ${error.message}`);
     return false;
   }
 }
 
-// ✅ PROTOCOLO ANDROID TV ADB (5555) - MELHOR CHANCE!
+// ✅ PROTOCOLO TCL
+async function sendTCLCommand(ip, command) {
+  try {
+    console.log(`📱 Tentando protocolo TCL...`);
+    
+    // Tentar Android TV primeiro
+    if (await tryAndroidADBProtocol(ip, command)) return true;
+    if (await tryAndroidTVProtocol(ip, command)) return true;
+    
+    return false;
+  } catch (error) {
+    return false;
+  }
+}
+
+// ✅ PROTOCOLO GENÉRICO
+async function sendGenericCommand(ip, command) {
+  try {
+    // Tentar Roku primeiro (muito comum)
+    if (await sendRokuCommand(ip, command)) return true;
+    
+    // Depois tentar Android
+    if (await tryAndroidADBProtocol(ip, command)) return true;
+    if (await tryAndroidTVProtocol(ip, command)) return true;
+    
+    // Tentar portas genéricas
+    const ports = [8001, 8080, 8009, 8000];
+    for (const port of ports) {
+      if (await trySendCommand(ip, port, command)) return true;
+    }
+    
+    return false;
+  } catch (error) {
+    return false;
+  }
+}
+
+// ✅ PROTOCOLO ANDROID TV ADB (5555)
 async function tryAndroidADBProtocol(ip, command) {
   try {
     console.log(`📱 Tentando protocolo Android ADB na porta 5555...`);
     
-    // Comandos ADB para Android TV
     const adbCommandMap = {
       'POWER': 'KEYCODE_POWER',
       'VOLUME_UP': 'KEYCODE_VOLUME_UP',
@@ -327,12 +388,8 @@ async function tryAndroidADBProtocol(ip, command) {
     };
     
     const adbCommand = adbCommandMap[command];
-    if (!adbCommand) {
-      console.log(`❌ Comando não mapeado para ADB: ${command}`);
-      return false;
-    }
+    if (!adbCommand) return false;
     
-    // Tentar enviar comando ADB via HTTP (algumas TVs Android aceitam)
     const response = await fetch(`http://${ip}:5555/keyevent/${adbCommand}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -341,7 +398,7 @@ async function tryAndroidADBProtocol(ip, command) {
     }).catch(() => null);
     
     if (response && response.ok) {
-      console.log(`✅ Protocolo Android ADB FUNCIONOU! Comando: ${adbCommand}`);
+      console.log(`✅ Protocolo Android ADB FUNCIONOU!`);
       return true;
     }
     
@@ -356,7 +413,6 @@ async function tryAndroidTVProtocol(ip, command) {
   try {
     console.log(`📱 Tentando protocolo Android TV na porta 6466...`);
     
-    // Mapeamento de comandos Android TV
     const androidCommandMap = {
       'POWER': 'POWER',
       'VOLUME_UP': 'VOLUME_UP',
@@ -374,12 +430,8 @@ async function tryAndroidTVProtocol(ip, command) {
     };
     
     const androidCommand = androidCommandMap[command];
-    if (!androidCommand) {
-      console.log(`❌ Comando não mapeado para Android TV: ${command}`);
-      return false;
-    }
+    if (!androidCommand) return false;
     
-    // Tentar enviar comando Android TV
     const response = await fetch(`http://${ip}:6466/command`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -388,7 +440,7 @@ async function tryAndroidTVProtocol(ip, command) {
     }).catch(() => null);
     
     if (response && response.ok) {
-      console.log(`✅ Protocolo Android TV FUNCIONOU! Comando: ${androidCommand}`);
+      console.log(`✅ Protocolo Android TV FUNCIONOU!`);
       return true;
     }
     
@@ -403,7 +455,6 @@ async function trySendCommand(ip, port, command) {
   try {
     console.log(`🔧 Testando protocolo porta ${port}...`);
     
-    // Mapeamento de comandos genéricos
     const commandMap = {
       'POWER': 'KEY_POWER',
       'VOLUME_UP': 'KEY_VOLUP', 
@@ -422,7 +473,6 @@ async function trySendCommand(ip, port, command) {
     
     const tvCommand = commandMap[command] || command;
     
-    // Tentar diferentes endpoints
     const endpoints = [
       `/api/command`,
       `/remoteControl`,
@@ -439,7 +489,7 @@ async function trySendCommand(ip, port, command) {
       }).catch(() => null);
       
       if (response && response.ok) {
-        console.log(`✅ Protocolo porta ${port} FUNCIONOU! Endpoint: ${endpoint}`);
+        console.log(`✅ Protocolo porta ${port} FUNCIONOU!`);
         return true;
       }
     }
@@ -456,7 +506,7 @@ app.get('/api/health', (req, res) => {
     success: true, 
     message: '🚀 SmartControl+ Backend Online!',
     timestamp: new Date().toISOString(),
-    protocols: 'TCL Android TV: ADB(5555), AndroidTV(6466), GoogleCast(8009)'
+    protocols: 'Roku(8060), AndroidTV(5555/6466), TCL'
   });
 });
 
@@ -464,10 +514,8 @@ app.get('/api/health', (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🎯 Backend rodando: http://localhost:${PORT}`);
-  console.log(`🔧 CORS configurado para todas as origens`);
-  console.log(`📺 Protocolos TCL Android TV implementados:`);
-  console.log(`   - Android ADB (5555) - Melhor chance!`);
-  console.log(`   - Android TV (6466)`);
-  console.log(`   - Google Cast (8009)`);
-  console.log(`   - Smart TV (8001, 8080)`);
+  console.log(`📺 Protocolos implementados:`);
+  console.log(`   - ROKU (8060) - Alta chance!`);
+  console.log(`   - Android TV (5555, 6466)`);
+  console.log(`   - Genérico (8001, 8080, 8009)`);
 });
