@@ -8,15 +8,17 @@ const app = express();
 const SUPABASE_URL = 'https://qfslkalwcejdrrqodgad.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmc2xrYWx3Y2VqZHJycW9kZ2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTI5MDksImV4cCI6MjA3ODUyODkwOX0.G4yXLAe251S9X636qNzXPz2-viOlTEqrNr2AyBNOfbQ';
 
-// ✅ CORS CONFIGURADO PARA DEPLOY
+// ✅ CORS CONFIGURADO PARA TODAS AS ORIGENS
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://*.vercel.app'],
+  origin: '*', // Permite todas as origens
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
 
 app.use(express.json());
 
 console.log('🚀 Iniciando SmartControl+ Backend...');
+console.log('🔧 CORS configurado para todas as origens');
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -24,7 +26,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   
-  console.log('🔐 Login:', email);
+  console.log('🔐 Tentando login:', email);
   
   try {
     const { data: users, error } = await supabase
@@ -35,7 +37,8 @@ app.post('/api/login', async (req, res) => {
       .limit(1);
 
     if (error) {
-      return res.json({ success: false, error: 'Erro no banco' });
+      console.error('Erro Supabase:', error);
+      return res.json({ success: false, error: 'Erro no banco de dados' });
     }
 
     if (users.length === 0) {
@@ -51,6 +54,7 @@ app.post('/api/login', async (req, res) => {
     });
     
   } catch (error) {
+    console.error('Erro no login:', error);
     res.json({ success: false, error: 'Erro no servidor' });
   }
 });
@@ -69,6 +73,7 @@ app.get('/api/user-tvs', async (req, res) => {
 
     res.json({ success: true, tvs: tvs || [] });
   } catch (error) {
+    console.error('Erro ao buscar TVs:', error);
     res.json({ success: false, error: 'Erro ao carregar TVs' });
   }
 });
@@ -77,7 +82,7 @@ app.get('/api/user-tvs', async (req, res) => {
 app.post('/api/discover-tv', async (req, res) => {
   const { userId } = req.body;
   
-  console.log('🔍 Procurando TV na rede...');
+  console.log('🔍 Procurando TV na rede para usuário:', userId);
   
   try {
    const commonIPs = [
@@ -186,4 +191,5 @@ app.get('/api/health', (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🎯 Backend rodando: http://localhost:${PORT}`);
+  console.log(`🔧 CORS configurado para todas as origens`);
 });
