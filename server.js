@@ -10,7 +10,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 // ✅ CORS CONFIGURADO PARA TODAS AS ORIGENS
 app.use(cors({
-  origin: '*', // Permite todas as origens
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -85,20 +85,27 @@ app.post('/api/discover-tv', async (req, res) => {
   console.log('🔍 Procurando TV na rede para usuário:', userId);
   
   try {
- const commonIPs = [
-  '192.168.1.128', // ✅ SEU IP DA TV HQ - PRIMEIRO NA LISTA!
-  '192.168.1.100', '192.168.1.101', '192.168.1.102', 
-  '192.168.0.100', '192.168.0.101', '192.168.0.102'
-];
+    // ✅ IP DA SUA TV HQ PRIMEIRO!
+    const commonIPs = [
+      '192.168.1.128', // ✅ SEU IP DA TV HQ
+      '192.168.1.100', '192.168.1.101', '192.168.1.102', 
+      '192.168.1.103', '192.168.1.104', '192.168.1.105',
+      '192.168.0.100', '192.168.0.101', '192.168.0.102',
+      '192.168.0.103', '192.168.0.104', '192.168.0.105'
+    ];
     
     let foundTV = null;
     
     for (const ip of commonIPs) {
-      console.log(`Testando IP: ${ip}`);
+      console.log(`🔎 Testando IP: ${ip}`);
       const isTV = await checkIfIsTV(ip);
       
       if (isTV) {
-        foundTV = { ip: ip, brand: 'samsung', name: 'Minha TV' };
+        foundTV = { 
+          ip: ip, 
+          brand: ip === '192.168.1.128' ? 'hq' : 'samsung', 
+          name: ip === '192.168.1.128' ? 'Minha TV HQ' : 'TV Descoberta'
+        };
         console.log(`🎉 TV encontrada: ${ip}`);
         break;
       }
@@ -131,24 +138,26 @@ app.post('/api/discover-tv', async (req, res) => {
 app.post('/api/send-command', async (req, res) => {
   const { tvIp, command } = req.body;
   
-  console.log(`📺 Comando: ${command} → ${tvIp}`);
+  console.log(`📡 Tentando comando REAL: ${command} → ${tvIp}`);
   
   try {
+    // ✅ AGORA TENTA PROTOCOLOS REAIS!
     const success = await sendCommandToTV(tvIp, command);
     
     if (success) {
       res.json({ 
         success: true, 
-        message: `✅ Comando "${command}" enviado!` 
+        message: `✅ Comando "${command}" enviado para TV!` 
       });
     } else {
       res.json({ 
         success: false, 
-        message: '❌ Falha ao enviar comando' 
+        message: '❌ TV não respondeu aos comandos' 
       });
     }
     
   } catch (error) {
+    console.error('Erro no comando:', error);
     res.json({ success: false, error: 'Erro no comando' });
   }
 });
@@ -156,10 +165,29 @@ app.post('/api/send-command', async (req, res) => {
 // 🛠️ FUNÇÕES AUXILIARES
 async function checkIfIsTV(ip) {
   try {
+    // Testar portas comuns de TVs
+    const ports = [8001, 8080, 8008, 8000, 8002, 8081];
+    
+    for (const port of ports) {
+      const isReachable = await checkPort(ip, port);
+      if (isReachable) {
+        console.log(`✅ TV detectada na porta ${port}`);
+        return true;
+      }
+    }
+    
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function checkPort(ip, port) {
+  try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1000);
     
-    const response = await fetch(`http://${ip}:8001`, { 
+    const response = await fetch(`http://${ip}:${port}`, { 
       method: 'GET',
       signal: controller.signal
     }).catch(() => null);
@@ -172,8 +200,103 @@ async function checkIfIsTV(ip) {
 }
 
 async function sendCommandToTV(ip, command) {
-  console.log(`✅ Comando simulado: ${command} → ${ip}`);
-  return true;
+  console.log(`📡 Tentando comando REAL: ${command} → ${ip}`);
+  
+  // ✅ TENTAR DIFERENTES PROTOCOLOS PARA TV HQ
+  try {
+    // Protocolo 1: Tentar porta comum de Smart TVs (8001)
+    if (await trySendCommand(ip, 8001, command)) {
+      return true;
+    }
+    
+    // Protocolo 2: Tentar porta 8080
+    if (await trySendCommand(ip, 8080, command)) {
+      return true;
+    }
+    
+    // Protocolo 3: Tentar porta 8008
+    if (await trySendCommand(ip, 8008, command)) {
+      return true;
+    }
+    
+    // Protocolo 4: Tentar porta 8000
+    if (await trySendCommand(ip, 8000, command)) {
+      return true;
+    }
+    
+    // Protocolo 5: Tentar porta 8002
+    if (await trySendCommand(ip, 8002, command)) {
+      return true;
+    }
+    
+    // Protocolo 6: Tentar porta 8081
+    if (await trySendCommand(ip, 8081, command)) {
+      return true;
+    }
+    
+    console.log(`❌ Nenhum protocolo funcionou para TV HQ`);
+    return false;
+    
+  } catch (error) {
+    console.log(`❌ Erro: ${error.message}`);
+    return false;
+  }
+}
+
+// ✅ NOVA FUNÇÃO PARA TESTAR DIFERENTES PROTOCOLOS
+async function trySendCommand(ip, port, command) {
+  try {
+    console.log(`🔧 Testando protocolo porta ${port}...`);
+    
+    // Mapeamento de comandos genéricos
+    const commandMap = {
+      'POWER': 'KEY_POWER',
+      'VOLUME_UP': 'KEY_VOLUP', 
+      'VOLUME_DOWN': 'KEY_VOLDOWN',
+      'MUTE': 'KEY_MUTE',
+      'UP': 'KEY_UP',
+      'DOWN': 'KEY_DOWN',
+      'LEFT': 'KEY_LEFT',
+      'RIGHT': 'KEY_RIGHT',
+      'ENTER': 'KEY_ENTER',
+      'HOME': 'KEY_HOME',
+      'BACK': 'KEY_BACK',
+      'MENU': 'KEY_MENU',
+      'SOURCE': 'KEY_SOURCE'
+    };
+    
+    const tvCommand = commandMap[command] || command;
+    
+    // Tentar enviar comando HTTP (protocolo comum)
+    const response = await fetch(`http://${ip}:${port}/api/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: tvCommand }),
+      signal: AbortSignal.timeout(2000)
+    }).catch(() => null);
+    
+    if (response && response.ok) {
+      console.log(`✅ Protocolo porta ${port} FUNCIONOU!`);
+      return true;
+    }
+    
+    // Tentar método alternativo (para algumas TVs)
+    const response2 = await fetch(`http://${ip}:${port}/remoteControl`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: tvCommand }),
+      signal: AbortSignal.timeout(2000)
+    }).catch(() => null);
+    
+    if (response2 && response2.ok) {
+      console.log(`✅ Protocolo alternativo porta ${port} FUNCIONOU!`);
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    return false;
+  }
 }
 
 // 🏥 ROTA DE SAÚDE
@@ -181,7 +304,8 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     success: true, 
     message: '🚀 SmartControl+ Backend Online!',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    tvHqIp: '192.168.1.128'
   });
 });
 
@@ -190,4 +314,6 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🎯 Backend rodando: http://localhost:${PORT}`);
   console.log(`🔧 CORS configurado para todas as origens`);
+  console.log(`📺 IP da TV HQ: 192.168.1.128`);
+  console.log(`🔍 Testando protocolos: 8001, 8080, 8008, 8000, 8002, 8081`);
 });
